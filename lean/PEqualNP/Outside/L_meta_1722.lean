@@ -1,0 +1,26 @@
+import Mathlib
+import PEqualNP.Defs
+
+set_option maxHeartbeats 800000 in
+theorem PEqualNP.Outside.L_meta_1722 : (∀ (q3 N3 k3 : ℕ) (I3 : Fin N3 → Fin N3 → Prop) [DecidableRel I3] (C3 : PEqualNP.CircuitLowerBounds.Circuit), 2 ≤ q3 → N3 = q3 ^ 2 + q3 + 1 → (∀ l3 : Fin N3, (Finset.univ.filter (fun p3 => I3 p3 l3)).card = q3 + 1) → (∀ pa3 pb3 : Fin N3, pa3 ≠ pb3 → ∃! lb3 : Fin N3, I3 pa3 lb3 ∧ I3 pb3 lb3) → (∀ g3 ∈ C3.gates, (g3.op = PEqualNP.CircuitLowerBounds.GateOp.and ∨ g3.op = PEqualNP.CircuitLowerBounds.GateOp.or) ∧ g3.inputs.length = 2) → PEqualNP.MetaComplexity.NestedCover.ReadsBack (N3 + N3) C3 → (∀ j3 < C3.gates.length, (PEqualNP.MetaComplexity.NestedCover.gateAt C3 j3).op = PEqualNP.CircuitLowerBounds.GateOp.and → (∃ i3 ∈ (PEqualNP.MetaComplexity.NestedCover.gateAt C3 j3).inputs, (C3.lineDegrees (N3 + N3) (Finset.Ico N3 (N3 + N3))).getD i3 0 = 0) ∨ (∀ h3 ∈ (PEqualNP.MetaComplexity.NestedCover.gateAt C3 j3).inputs, (C3.lineDegrees (N3 + N3) (Finset.range N3)).getD h3 0 = 0)) → (∀ p3a l3a : Fin N3, I3 p3a l3a → PEqualNP.MetaComplexity.circuitFun (N3 + N3) C3 (fun i3a => decide (i3a = Fin.castAdd N3 p3a ∨ i3a = Fin.natAdd N3 l3a)) = true) → (∀ z3 : Fin (N3 + N3) → Bool, (Finset.univ.filter (fun l3b : Fin N3 => z3 (Fin.natAdd N3 l3b) = true)).card ≤ k3 → (¬ ∃ p3b l3c : Fin N3, I3 p3b l3c ∧ z3 (Fin.castAdd N3 p3b) = true ∧ z3 (Fin.natAdd N3 l3c) = true) → PEqualNP.MetaComplexity.circuitFun (N3 + N3) C3 z3 = false) → N3 * q3 * min k3 q3 ≤ 5 * q3 * C3.size + N3 * min k3 q3) → (∀ (N4 : ℕ) (C4 : PEqualNP.CircuitLowerBounds.Circuit), PEqualNP.MetaComplexity.Monotone2 C4 → PEqualNP.MetaComplexity.NestedCover.ReadsBack (N4 + N4) C4 → (∀ j4 < C4.gates.length, (PEqualNP.MetaComplexity.NestedCover.gateAt C4 j4).op = PEqualNP.CircuitLowerBounds.GateOp.and → (∃ i4 ∈ (PEqualNP.MetaComplexity.NestedCover.gateAt C4 j4).inputs, (C4.lineDegrees (N4 + N4) (Finset.Ico N4 (N4 + N4))).getD i4 0 = 0) ∨ (∀ h4 ∈ (PEqualNP.MetaComplexity.NestedCover.gateAt C4 j4).inputs, (C4.lineDegrees (N4 + N4) (Finset.range N4)).getD h4 0 = 0)) → (∃ z4 z4a : Fin (N4 + N4) → Bool, PEqualNP.MetaComplexity.circuitFun (N4 + N4) C4 z4 ≠ PEqualNP.MetaComplexity.circuitFun (N4 + N4) C4 z4a) → ∃ D4 : PEqualNP.CircuitLowerBounds.Circuit, ((∀ g4 ∈ D4.gates, (g4.op = PEqualNP.CircuitLowerBounds.GateOp.and ∨ g4.op = PEqualNP.CircuitLowerBounds.GateOp.or) ∧ g4.inputs.length = 2) ∧ PEqualNP.MetaComplexity.NestedCover.ReadsBack (N4 + N4) D4) ∧ (∀ j4a < D4.gates.length, (PEqualNP.MetaComplexity.NestedCover.gateAt D4 j4a).op = PEqualNP.CircuitLowerBounds.GateOp.and → (∃ i4a ∈ (PEqualNP.MetaComplexity.NestedCover.gateAt D4 j4a).inputs, (D4.lineDegrees (N4 + N4) (Finset.Ico N4 (N4 + N4))).getD i4a 0 = 0) ∨ (∀ h4a ∈ (PEqualNP.MetaComplexity.NestedCover.gateAt D4 j4a).inputs, (D4.lineDegrees (N4 + N4) (Finset.range N4)).getD h4a 0 = 0)) ∧ D4.size ≤ C4.size ∧ PEqualNP.MetaComplexity.circuitFun (N4 + N4) D4 = PEqualNP.MetaComplexity.circuitFun (N4 + N4) C4) → ∀ (q N : ℕ) (I : Fin N → Fin N → Prop) [DecidableRel I] (C : PEqualNP.CircuitLowerBounds.Circuit), 2 ≤ q → N = q ^ 2 + q + 1 → (∀ l : Fin N, (Finset.univ.filter (fun p => I p l)).card = q + 1) → (∀ p p' : Fin N, p ≠ p' → ∃! l : Fin N, I p l ∧ I p' l) → PEqualNP.MetaComplexity.Monotone2 C → PEqualNP.MetaComplexity.NestedCover.ReadsBack (N + N) C → (∀ j5 < C.gates.length, (PEqualNP.MetaComplexity.NestedCover.gateAt C j5).op = PEqualNP.CircuitLowerBounds.GateOp.and → (∃ i5 ∈ (PEqualNP.MetaComplexity.NestedCover.gateAt C j5).inputs, (C.lineDegrees (N + N) (Finset.Ico N (N + N))).getD i5 0 = 0) ∨ (∀ h5 ∈ (PEqualNP.MetaComplexity.NestedCover.gateAt C j5).inputs, (C.lineDegrees (N + N) (Finset.range N)).getD h5 0 = 0)) → (∀ p l : Fin N, I p l → PEqualNP.MetaComplexity.circuitFun (N + N) C (fun k => decide (k = Fin.castAdd N p ∨ k = Fin.natAdd N l)) = true) → (∀ z : Fin (N + N) → Bool, (Finset.univ.filter (fun l : Fin N => z (Fin.natAdd N l) = true)).card ≤ q → (¬ ∃ p l : Fin N, I p l ∧ z (Fin.castAdd N p) = true ∧ z (Fin.natAdd N l) = true) → PEqualNP.MetaComplexity.circuitFun (N + N) C z = false) → N * q ≤ 100 * C.size := by
+  intro bound normalize q N I inst C hq hN hline huniq hmono hback hkm hacc hsound
+  have hNpos : 0 < N := by nlinarith
+  let l : Fin N := ⟨0,hNpos⟩
+  have hpos : 0 < (Finset.univ.filter fun p => I p l).card := by rw [hline]; omega
+  obtain ⟨p,hp⟩ := Finset.card_pos.mp hpos
+  have hip : I p l := (Finset.mem_filter.mp hp).2
+  have hzero : PEqualNP.MetaComplexity.circuitFun (N+N) C (fun _ => false) = false :=
+    hsound _ (by simp) (by simp)
+  have hnc : ∃ z z' : Fin (N+N) → Bool,
+      PEqualNP.MetaComplexity.circuitFun (N+N) C z ≠ PEqualNP.MetaComplexity.circuitFun (N+N) C z' := by
+    refine ⟨fun i => decide (i = Fin.castAdd N p ∨ i = Fin.natAdd N l), fun _ => false, ?_⟩
+    rw [hacc p l hip, hzero]
+    decide
+  obtain ⟨D,⟨hDg,hDb⟩,hDk,hDs,heq⟩ := normalize N C hmono hback hkm hnc
+  have hb := bound q N q I D hq hN hline huniq hDg hDb hDk
+    (by simpa only [heq] using hacc) (by simpa only [heq] using hsound)
+  simp only [min_self] at hb
+  have hc : q * (N*q) ≤ q * (5*D.size+N) := by nlinarith [hb]
+  have hd : N*q ≤ 5*D.size+N := Nat.le_of_mul_le_mul_left hc (by omega)
+  have hn : 2*N ≤ N*q := by nlinarith [Nat.mul_le_mul_left N hq]
+  nlinarith

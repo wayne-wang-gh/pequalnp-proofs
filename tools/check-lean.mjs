@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // THE CHECKER. Nothing else can mark a lemma checked or refuted.
 //
-//   node tools/check-lean.mjs <lean file> <statement file> [check|refute]
+//   node tools/check-lean.mjs <lean file> <statement file> [check|refute|reduce]
 //
 // Exit 0 ONLY when all of these hold, each read from the compiled result:
 //   1. the file builds in the pinned environment (lean/lean-toolchain, lean/lake-manifest.json);
@@ -11,6 +11,15 @@
 //   4. the theorem is a proof of the recorded statement (of its negation for `refute`), where the
 //      statement is read against the pinned library and the definitions root (PEqualNP.Defs)
 //      and nothing else of this project, whatever the file imports.
+//   For `reduce` (the decomposition door, ships dark): the theorem is T1 → ... → Tk → S with
+//   2 ≤ k ≤ 4 non-dependent arrows, S structurally the recorded statement, each Ti a closed
+//   proposition of the statement environment, distinct, not S, not False, and the file declares
+//   nothing but the theorem. The verifier prints one `CHILD <i> <text>` line per child (Lean's own
+//   printing, checked to read back to the same term); they are carried out unchanged.
+//   A child with a string or name literal, a text type (String, Char, Lean.Name, ...) among its
+//   constants, a constant of Lean's meta namespaces (Lean, Std.Format, IO, ...) under it, a
+//   metadata node, or more than 2000 printed characters is refused (reduce-child); one that contains
+//   S as a subterm or that `decide` evaluates to false is refused (reduce-waste).
 // On acceptance it prints, before the last line, one line recorded with the result:
 //   MANIFEST {"rests_on":[{"module","sha256"}...],"defs":[{"module","sha256"}...]}
 // the source hash of every project module the theorem rests on and of every module of the
@@ -40,7 +49,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const CHECKER_VERSION = 'check-lean 3';   // 2026-11-22: stricter (one name, one meaning; fixed inputs; faults told apart from rejections)
+export const CHECKER_VERSION = 'check-lean 4';   // 2026-11-24: kind reduce (decomposition door, dark), with the text and waste screens on its children
 const DEFS_ROOT = 'PEqualNP.Defs';
 const CHECKER_LEAN_DIR = join(dirname(dirname(fileURLToPath(import.meta.url))), 'lean');
 const LEAN_DIR = process.env.PEQUALNP_REPO_ROOT ? join(process.env.PEQUALNP_REPO_ROOT, 'lean') : CHECKER_LEAN_DIR;
@@ -66,8 +75,8 @@ process.on('uncaughtException', (e) => fault(`the checker stopped on an error of
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 
 const [file, statement, kind = 'check'] = process.argv.slice(2);
-if (!file || !statement) fault('usage: node tools/check-lean.mjs <lean file> <statement file> [check|refute]');
-if (kind !== 'check' && kind !== 'refute') fault(`kind must be check or refute, got "${kind}"`);
+if (!file || !statement) fault('usage: node tools/check-lean.mjs <lean file> <statement file> [check|refute|reduce]');
+if (kind !== 'check' && kind !== 'refute' && kind !== 'reduce') fault(`kind must be check, refute or reduce, got "${kind}"`);
 if (!existsSync(file)) fault(`the lemma file ${file} does not exist`);
 if (!existsSync(statement)) fault(`the statement file ${statement} does not exist`);
 // The recorded statement, as it is now. Nothing that runs later can change what is judged.

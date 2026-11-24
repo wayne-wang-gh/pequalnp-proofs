@@ -4,16 +4,36 @@
 // passed a strict pattern, so the shell never sees free text from a pull request.
 //
 //   node outside-guard.mjs pr <pr.json> <files.json> <tree.json> <repo> <default branch> <out dir>
-//   node outside-guard.mjs gap <gaps.json> <gap id> <file path> <out dir>
+//   node outside-guard.mjs gap <gaps.json> <gap id> <file path> <out dir> [check|refute|reduce]
 //   node outside-guard.mjs gap-of-file <gaps.json> <file path> <out dir>
-//   node outside-guard.mjs imports <lean file> <imports.json> <file path in the pull request>
-//   node outside-guard.mjs closure <base dir> <imports.json> <judged file path> <out dir>
+//   node outside-guard.mjs imports <lean file> <imports.json> <file path in the pull request> [kind]
+//   node outside-guard.mjs closure <base dir> <imports.json> <judged file path> <out dir> [kind]
+//
+// KINDS. A proof (check) or a refutation (refute) of a posted step S is the file of its gap row,
+// lean/PEqualNP/Outside/L_<gap>.lean. A REDUCTION of S (kind reduce, ships dark) is
+// lean/PEqualNP/Outside/R_<gap>_<n>.lean, n from 1 to 999 without leading zeros, one theorem
+// T1 -> ... -> Tk -> S; it is judged only when the run asks for kind reduce AND the desk's row of S
+// carries `reductions: true`. An R_ file is refused for every other kind, an L_ file for reduce.
+// Without a kind argument (the advisory run) an R_ file is refused.
 //
 // Exit 0: the guard holds. Exit 1: REFUSED, with one line saying why. Exit 3: bad usage.
 import { lstatSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-export const FILE_RE = /^lean\/PEqualNP\/Outside\/L_[a-z0-9_]+\.lean$/;
+// An outside file: L_<gap>.lean (a proof or refutation) or R_<gap>_<n>.lean (a reduction).
+export const FILE_RE = /^lean\/PEqualNP\/Outside\/(L_[a-z0-9_]+|R_[a-z0-9_]+_[1-9][0-9]{0,2})\.lean$/;
+export const L_FILE_RE = /^lean\/PEqualNP\/Outside\/L_[a-z0-9_]+\.lean$/;
+export const R_FILE_RE = /^lean\/PEqualNP\/Outside\/R_[a-z0-9_]+_[1-9][0-9]{0,2}\.lean$/;
+export const KINDS = ['check', 'refute', 'reduce'];
+const FILE_SAY = 'the one file must be lean/PEqualNP/Outside/L_<gap>.lean (or R_<gap>_<n>.lean, n from 1 to 999, for a reduction)';
+// The file name must fit the run's kind: an R_ file only for reduce, an L_ file never for reduce.
+export function checkFileKind(file, kind) {
+  if (typeof file !== 'string' || !FILE_RE.test(file)) refuse(FILE_SAY);
+  if (kind !== undefined && !KINDS.includes(kind)) refuse(`the kind must be check, refute or reduce, not ${kind}`);
+  if (R_FILE_RE.test(file) && kind !== 'reduce') refuse(`${file} is a reduction file (R_<gap>_<n>); it is judged only by a run of kind reduce`);
+  if (L_FILE_RE.test(file) && kind === 'reduce') refuse(`a run of kind reduce judges only a reduction file lean/PEqualNP/Outside/R_<gap>_<n>.lean, not ${file}`);
+  return file;
+}
 export const GAP_RE = /^L-[a-z0-9]+(-[a-z0-9]+)*$/;
 export const MODULE_RE = /^PEqualNP(\.[A-Za-z][A-Za-z0-9_]*)+$/;
 export const MAX_BYTES = 512 * 1024;
@@ -39,7 +59,7 @@ export function checkPr(pr, files, tree, repo, defaultBranch) {
   if (pr.changed_files !== 1) refuse(`the pull request changes ${pr.changed_files} files; it must add exactly one`);
   if (!Array.isArray(files) || files.length !== 1) refuse('the pull request must add exactly one file');
   const f = files[0];
-  if (typeof f.filename !== 'string' || !FILE_RE.test(f.filename)) refuse('the one file must be lean/PEqualNP/Outside/L_<gap>.lean');
+  if (typeof f.filename !== 'string' || !FILE_RE.test(f.filename)) refuse(FILE_SAY);
   if (f.status !== 'added') refuse(`the file must be added, not ${f.status}`);
   if (!SHA_RE.test(f.sha ?? '')) refuse('the file list names no content hash');
   // The tree says what kind of entry it is. 100644 is a plain file: a symbolic link is 120000,
@@ -54,19 +74,49 @@ export function checkPr(pr, files, tree, repo, defaultBranch) {
   return { file: f.filename, module: moduleOf(f.filename), head, blob: f.sha, author, size: e.size };
 }
 
-// The gap as the desk posts it. Its file must be the file of the pull request.
-export function checkGap(gaps, pick, file) {
+// The gap as the desk posts it. Its file must be the file of the pull request; for a reduction,
+// the pull request's file is R_<the gap's L_ name without L_>_<n>.lean. `want` is the run's kind
+// (undefined: none given, so the desk's kind stands and an R_ file is refused).
+export function checkGap(gaps, pick, file, want) {
   const all = Array.isArray(gaps?.gaps) ? gaps.gaps : refuse('the gap list has no gaps');
   const found = all.filter(pick);
-  if (found.length !== 1) refuse('the gap is not posted (it may be checked already, or withdrawn)');
+  if (found.length !== 1) {
+    // Say WHY the step is not open, from the desk file itself, so an agent working from a saved list
+    // learns to ask the desk again (hub-oncall and the red team, 2026-11-24: one handle had 20 of 24
+    // runs refused only for this). The desk file carries no time for these, so none is given.
+    // The reason text is the desk's own (the fleet's), already public in the same file.
+    const done = Array.isArray(gaps?.checked) ? gaps.checked.find((c) => c && pick(c)) : undefined;
+    if (done) refuse(`the step ${GAP_RE.test(String(done.id)) ? done.id : ''} is already CHECKED (it is in the desk file's checked list): ask the desk for a step that is still open`);
+    const w = gaps?.withdrawn && typeof gaps.withdrawn === 'object' ? Object.keys(gaps.withdrawn).find((id) => pick({ id })) : undefined;
+    if (w) {
+      const why = String(gaps.withdrawn[w] ?? '').replace(/[^A-Za-z0-9 .,;:()'_+=<>-]/g, '').slice(0, 200);
+      refuse(`the step ${GAP_RE.test(w) ? w : ''} was WITHDRAWN from the desk (${why || 'no reason given'}): ask the desk for a step that is still open`);
+    }
+    refuse('the step is not on the desk (not open, not in its checked or withdrawn lists): ask the desk for a step that is still open');
+  }
   const g = found[0];
   if (typeof g.id !== 'string' || !GAP_RE.test(g.id)) refuse('the posted gap has a malformed id');
-  if (g.file !== file || !FILE_RE.test(file)) refuse(`the file of gap ${g.id} is not the file of this pull request`);
-  if (g.module !== moduleOf(file)) refuse(`gap ${g.id} names a module that is not its file`);
+  checkFileKind(file, want);
+  if (typeof g.file !== 'string' || !L_FILE_RE.test(g.file)) refuse(`gap ${g.id} names no file lean/PEqualNP/Outside/L_<gap>.lean`);
+  if (g.module !== moduleOf(g.file)) refuse(`gap ${g.id} names a module that is not its file`);
+  const reduce = want === 'reduce';
+  if (reduce) {
+    const n = /_([1-9][0-9]{0,2})\.lean$/.exec(file)?.[1];
+    if (!n || file !== `lean/PEqualNP/Outside/R_${g.file.slice('lean/PEqualNP/Outside/L_'.length, -'.lean'.length)}_${n}.lean`) refuse(`${file} is not a reduction file of gap ${g.id} (that would be ${g.file.replace('/L_', '/R_').replace(/\.lean$/, '_<n>.lean')})`);
+  } else if (g.file !== file) refuse(`the file of gap ${g.id} is not the file of this pull request`);
   if (typeof g.statement !== 'string' || !g.statement.trim() || g.statement.includes('\0')) refuse(`gap ${g.id} has no statement`);
   const imports = g.imports ?? [];
   if (!Array.isArray(imports) || !imports.every((m) => typeof m === 'string' && MODULE_RE.test(m))) refuse(`gap ${g.id} lists a malformed import`);
-  return { id: g.id, statement: g.statement, imports };
+  // A step the desk posts as a REFUTATION is judged with the checker's refute kind: the file's
+  // theorem must be the negation of the recorded statement. Any other value is refused.
+  const kind = g.kind === undefined || g.kind === 'check' ? 'check' : g.kind === 'refute' ? 'refute' : refuse(`gap ${g.id} has an unknown kind`);
+  if (want !== undefined && !reduce && want !== kind) refuse(`the run's kind is ${want}, and the desk posts gap ${g.id} as kind ${kind}`);
+  if (!reduce) return { id: g.id, statement: g.statement, imports, kind };
+  // A REDUCTION (dark until the desk opens a step to it): the theorem is T1 -> ... -> Tk -> S, so
+  // only a step posted to be proved can be reduced, and only one the desk marks open to reductions.
+  if (g.reductions !== true) refuse(`gap ${g.id} is not open to reductions: the desk's row carries no \`reductions: true\`, so no reduction of it is judged`);
+  if (kind !== 'check') refuse(`gap ${g.id} is posted as a ${kind} step; only a step posted to be proved is reduced`);
+  return { id: g.id, statement: g.statement, imports, kind: 'reduce' };
 }
 
 // The import rule. The file starts with its import lines, one module per line, and nothing else
@@ -138,7 +188,10 @@ export function checkPlain(text) {
     const m = FORBIDDEN.exec(line.replace(LIMIT, '').replace(/@\[(local )?simp\]/gu, ''));
     // A line that BEGINS with a name starting add_ reads like one of the library's add_ commands.
     // An honest proof line can begin with such a lemma name: the sentence says the way round.
-    const hint = m && /^add_/.test(m[0].trim()) ? '; a line may not BEGIN with a name that starts with add_ (the library\'s commands do): if this is a lemma of yours used in a proof, put it after other text on the line or rename it' : '';
+    let hint = m && /^add_/.test(m[0].trim()) ? '; a line may not BEGIN with a name that starts with add_ (the library\'s commands do): if this is a lemma of yours used in a proof, put it after other text on the line or rename it' : '';
+    // A limit option set for the whole file (no `in`) is refused, as before; the sentence names the
+    // one fix, so an honest prover passes in one push (red team, 2026-11-23: the rule stays narrow).
+    if (m && /^\s*set_option (maxRecDepth|maxHeartbeats|synthInstance\.maxSize|synthInstance\.maxHeartbeats) [0-9]+\s*$/u.test(line)) hint = '; a limit option holds only for one declaration: write it as set_option <option> <value> in, directly before the declaration that needs it';
     if (m) refuse(`line ${k + 1}: "${m[0].trim()}" is not allowed in a proof file, in code or in a comment (no code that runs at build time, no new syntax, no string literals, no attributes but simp, no options but the four limits)${hint}`);
     if (/^\s*(@\[(local )?simp\] )?((private|protected) )?theorem /u.test(line)) theorems += 1;
   });
@@ -184,7 +237,8 @@ export function blankComments(text) {
 }
 
 export function checkOwnNamespace(text, module) {
-  if (!OUTSIDE_MODULE_RE.test(module)) refuse(`${module} is not the module of an outside proof file`);
+  const reduction = REDUCTION_MODULE_RE.test(module);
+  if (!OUTSIDE_MODULE_RE.test(module) && !reduction) refuse(`${module} is not the module of an outside proof file`);
   if (module.endsWith('_aux')) refuse('the file name may not end in _aux (that suffix names the helper namespace of another file)');
   const own = (n) => n === module || n.startsWith(`${module}.`) || n === `${module}_aux` || n.startsWith(`${module}_aux.`);
   const fix = `put every helper inside \`namespace ${module}\` ... \`end ${module}\`; only the imports and the theorem stay outside`;
@@ -199,6 +253,8 @@ export function checkOwnNamespace(text, module) {
       if (!m) refuse(`${at}: \`namespace\`, \`section\`, \`end\` and \`mutual\` must stand alone at the start of a line (not indented, nothing else on it); ${fix}`);
       if (theorem) refuse(`${at}: nothing but the proof may follow the theorem ${module}; ${fix}`);
       if (m[1]) {
+        // The checker refuses a reduction file that declares anything but its theorem (reduce-extra).
+        if (reduction) refuse(`${at}: \`namespace ${m[2]}\`; a reduction file holds its one theorem \`theorem ${module} : T1 → ... → Tk → S\` and nothing else, so it opens no namespace`);
         if (stack.length === 0 && !own(m[2])) refuse(`${at}: \`namespace ${m[2]}\` at the top level; the only namespace allowed there is the file's own; ${fix}`);
         stack.push({ kind: 'namespace', name: m[2] });
       } else if (m[3]) {
@@ -249,6 +305,8 @@ export function checkOwnNamespace(text, module) {
 // file that builds on outside proofs imports the outside modules themselves, and the gap lists
 // them; fleet helpers built on outside proofs stay off the lists.
 export const OUTSIDE_MODULE_RE = /^PEqualNP\.Outside\.L_[a-z0-9_]+$/;
+// The module of a reduction file. Never a listed import: a gap lists only L_ modules.
+export const REDUCTION_MODULE_RE = /^PEqualNP\.Outside\.R_[a-z0-9_]+_[1-9][0-9]{0,2}$/;
 export const MAX_OUTSIDE = 16;
 const PROJECT_RE = /^(PEqualNP|CheckerSuite)(\.[A-Za-z][A-Za-z0-9_]*)*$/;
 const BASE_ROOT_RE = /^PEqualNP(\.[A-Za-z][A-Za-z0-9_]*)*$/;
@@ -330,24 +388,25 @@ const main = () => {
   if (cmd === 'pr' && a.length === 6) {
     const r = checkPr(json(a[0]), json(a[1]), json(a[2]), a[3], a[4]);
     for (const [k, v] of Object.entries(r)) put(a[5], `pr.${k}`, `${v}\n`);
-  } else if ((cmd === 'gap' && a.length === 4) || (cmd === 'gap-of-file' && a.length === 3)) {
+  } else if ((cmd === 'gap' && (a.length === 4 || a.length === 5)) || (cmd === 'gap-of-file' && a.length === 3)) {
     const byId = cmd === 'gap';
     const [gapsPath, file, out] = byId ? [a[0], a[2], a[3]] : a;
     if (byId && !GAP_RE.test(a[1])) refuse('the gap id is malformed');
-    const g = checkGap(json(gapsPath), byId ? (x) => x?.id === a[1] : (x) => x?.file === file, file);
+    const g = checkGap(json(gapsPath), byId ? (x) => x?.id === a[1] : (x) => x?.file === file, file, byId ? a[4] : undefined);
     put(out, 'gap.id', `${g.id}\n`);
     put(out, 'statement.txt', g.statement);          // the posted text, byte for byte
     put(out, 'imports.json', JSON.stringify(g.imports));
     put(out, 'imports.txt', g.imports.map((m) => `${m}\n`).join(''));
-  } else if (cmd === 'imports' && a.length === 3) {
-    if (!FILE_RE.test(a[2])) refuse('the file must be lean/PEqualNP/Outside/L_<gap>.lean');
+    put(out, 'gap.kind', `${g.kind}\n`);
+  } else if (cmd === 'imports' && (a.length === 3 || a.length === 4)) {
+    checkFileKind(a[2], a[3]);
     const bytes = readFileSync(a[0]);
     const seen = checkImports(bytes, json(a[1]));
     checkOwnNamespace(new TextDecoder().decode(bytes), moduleOf(a[2]));
     process.stdout.write(`imports allowed: ${seen.join(' ') || '(none)'}\n`);
-  } else if (cmd === 'closure' && a.length === 4) {
+  } else if (cmd === 'closure' && (a.length === 4 || a.length === 5)) {
     const [baseDir, importsPath, judgedFile, out] = a;
-    if (!FILE_RE.test(judgedFile)) refuse('the judged file is not lean/PEqualNP/Outside/L_<gap>.lean');
+    checkFileKind(judgedFile, a[4]);
     const listed = json(importsPath);
     if (!Array.isArray(listed) || !listed.every((m) => typeof m === 'string' && MODULE_RE.test(m))) refuse('the listed imports are malformed');
     // A module's file in the base tree: a plain file (not a link), at most 512 KiB, else null.

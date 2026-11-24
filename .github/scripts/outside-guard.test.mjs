@@ -187,4 +187,132 @@ ownRefused('a file name ending in _aux', `theorem PEqualNP.Outside.L_meta_9_aux 
 
 // The add_ rule's sentence names the way round for an honest proof line.
 refused('a proof line that begins with a lemma named add_...', `theorem PEqualNP.Outside.L_x_1 : True := by\n  exact\n    add_or_out\n`, 'may not BEGIN with a name that starts with add_');
+// A file-wide limit option is refused with the one fix named; anything else set file-wide gets no such hint.
+refused('a limit option set for the whole file', `set_option maxHeartbeats 400000\n${thm}`, 'write it as set_option <option> <value> in');
+refused('a file-wide option that is not a limit', `set_option autoImplicit true\n${thm}`, 'no options but the four limits');
+test('no limit hint for an option that is not a limit', () => {
+  assert.throws(() => run(`set_option autoImplicit true\n${thm}`), (e) => !e.message.includes('write it as set_option'));
+});
 refused('an add_ command still refused', `add_decl_doc Nat.succ\n${thm}`, '"add_decl_doc" is not allowed');
+
+// A refutation step: the desk's kind decides how the checker judges the file.
+import { checkGap as checkGapKind } from './outside-guard.mjs';
+const KF = 'lean/PEqualNP/Outside/L_meta_632.lean';
+const krow = (kind, more = {}) => ({ gaps: [{ id: 'L-meta-632', file: KF, module: 'PEqualNP.Outside.L_meta_632', statement: 'True', imports: [], ...(kind === undefined ? {} : { kind }), ...more }] });
+const pick632 = (x) => x.id === 'L-meta-632';
+test('gap kind: a step without a kind is judged as a check', () => { assert.equal(checkGapKind(krow(undefined), pick632, KF).kind, 'check'); });
+test('gap kind: a refutation step is judged as a refutation', () => { assert.equal(checkGapKind(krow('refute'), pick632, KF).kind, 'refute'); });
+test('gap kind: an unknown kind is refused', () => { assert.throws(() => checkGapKind(krow('prove'), pick632, KF), /unknown kind/); });
+test('gap kind: a run of kind refute on a refutation step passes', () => { assert.equal(checkGapKind(krow('refute'), pick632, KF, 'refute').kind, 'refute'); });
+test('gap kind: a run of kind check on a refutation step is refused', () => { assert.throws(() => checkGapKind(krow('refute'), pick632, KF, 'check'), /the desk posts gap L-meta-632 as kind refute/); });
+test('gap kind: a run of kind refute on a check step is refused', () => { assert.throws(() => checkGapKind(krow(undefined), pick632, KF, 'refute'), /as kind check/); });
+
+// A reduction of a posted step S: lean/PEqualNP/Outside/R_<gap>_<n>.lean, kind reduce, and the desk's
+// row of S carries reductions: true (dark: absent means refused).
+import { checkFileKind, checkPr as checkPrR, FILE_RE as FILE_RE_R } from './outside-guard.mjs';
+const RF = (n) => `lean/PEqualNP/Outside/R_meta_632_${n}.lean`;
+test('reduce: a valid R_ file with kind reduce and reductions: true passes', () => {
+  const g = checkGapKind(krow(undefined, { reductions: true }), pick632, RF(1), 'reduce');
+  assert.equal(g.kind, 'reduce'); assert.equal(g.statement, 'True'); assert.equal(g.id, 'L-meta-632');
+  assert.equal(checkGapKind(krow('check', { reductions: true }), pick632, RF(999), 'reduce').kind, 'reduce');
+});
+test('reduce: a step without reductions: true is refused, with the reason', () => {
+  assert.throws(() => checkGapKind(krow(undefined), pick632, RF(1), 'reduce'), /not open to reductions: the desk's row carries no `reductions: true`/);
+});
+test('reduce: reductions set to anything but true is refused', () => {
+  for (const r of ['true', 1, false, null, {}]) assert.throws(() => checkGapKind(krow(undefined, { reductions: r }), pick632, RF(1), 'reduce'), /not open to reductions/);
+});
+test('reduce: a refutation step is not reduced, even with reductions: true', () => {
+  assert.throws(() => checkGapKind(krow('refute', { reductions: true }), pick632, RF(1), 'reduce'), /only a step posted to be proved is reduced/);
+});
+test('reduce: an R_ file with kind check is refused', () => {
+  assert.throws(() => checkGapKind(krow(undefined, { reductions: true }), pick632, RF(1), 'check'), /judged only by a run of kind reduce/);
+  assert.throws(() => checkFileKind(RF(1), 'check'), /judged only by a run of kind reduce/);
+});
+test('reduce: an R_ file with kind refute, or with no kind, is refused', () => {
+  assert.throws(() => checkGapKind(krow('refute', { reductions: true }), pick632, RF(1), 'refute'), /judged only by a run of kind reduce/);
+  assert.throws(() => checkGapKind(krow(undefined, { reductions: true }), pick632, RF(1)), /judged only by a run of kind reduce/);
+});
+test('reduce: an L_ file with kind reduce is refused', () => {
+  assert.throws(() => checkGapKind(krow(undefined, { reductions: true }), pick632, KF, 'reduce'), /judges only a reduction file/);
+  assert.throws(() => checkFileKind(KF, 'reduce'), /judges only a reduction file/);
+});
+test('reduce: n of 4 digits, 0, or a leading zero is refused', () => {
+  for (const n of ['1000', '0', '00', '01', '007']) {
+    assert.equal(FILE_RE_R.test(RF(n)), false, n);
+    assert.throws(() => checkGapKind(krow(undefined, { reductions: true }), pick632, RF(n), 'reduce'), /the one file must be/, n);
+  }
+  for (const n of ['1', '10', '999']) assert.equal(FILE_RE_R.test(RF(n)), true, n);
+});
+test('reduce: an R_ file of ANOTHER step is refused', () => {
+  assert.throws(() => checkGapKind(krow(undefined, { reductions: true }), pick632, 'lean/PEqualNP/Outside/R_meta_63_21.lean', 'reduce'), /is not a reduction file of gap L-meta-632/);
+  assert.throws(() => checkGapKind(krow(undefined, { reductions: true }), pick632, 'lean/PEqualNP/Outside/R_meta_6321_1.lean', 'reduce'), /is not a reduction file of gap L-meta-632/);
+});
+test('reduce: an unknown run kind is refused', () => {
+  assert.throws(() => checkGapKind(krow(undefined, { reductions: true }), pick632, KF, 'prove'), /must be check, refute or reduce/);
+  assert.throws(() => checkGapKind(krow(undefined, { reductions: true }), pick632, KF, ''), /must be check, refute or reduce/);
+});
+test('reduce: the pull request may add an R_ file (the kind is decided at the gap step)', () => {
+  const sha = 'a'.repeat(40), blob = 'b'.repeat(40);
+  const pr = { state: 'open', base: { repo: { full_name: 'o/r' }, ref: 'main' }, head: { sha }, user: { login: 'someone' }, changed_files: 1 };
+  const r = checkPrR(pr, [{ filename: RF(3), status: 'added', sha: blob }], { tree: [{ path: RF(3), type: 'blob', mode: '100644', sha: blob, size: 10 }] }, 'o/r', 'main');
+  assert.equal(r.module, 'PEqualNP.Outside.R_meta_632_3');
+  assert.throws(() => checkPrR(pr, [{ filename: RF('0'), status: 'added', sha: blob }], { tree: [] }, 'o/r', 'main'), /the one file must be/);
+});
+// The own-namespace rule for a reduction file: the theorem alone, under the R_ name.
+const RM = 'PEqualNP.Outside.R_meta_632_1';
+test('reduce: a reduction file with its one theorem passes the own-namespace rule', () => {
+  checkOwnNamespace(`import Mathlib\nopen Nat\ntheorem ${RM} : (1 = 1) → (2 = 2) → True := by\n  intro _ _\n  trivial\n`, RM);
+});
+test('reduce: a reduction file that opens a namespace is refused', () => {
+  assert.throws(() => checkOwnNamespace(`import Mathlib\nnamespace ${RM}\ndef f : ℕ := 1\nend ${RM}\ntheorem ${RM} : (1 = 1) → (2 = 2) → True := fun _ _ => trivial\n`, RM), /a reduction file holds its one theorem/);
+});
+test('reduce: a reduction file whose theorem has another name is refused', () => {
+  assert.throws(() => checkOwnNamespace(`import Mathlib\ntheorem PEqualNP.Outside.L_meta_632 : True := trivial\n`, RM), /line 2: a declaration/);
+});
+test('reduce: an R_ module of 4 digits is not an outside module', () => {
+  assert.throws(() => checkOwnNamespace(`theorem PEqualNP.Outside.R_meta_632_1000 : True := trivial\n`, 'PEqualNP.Outside.R_meta_632_1000'), /is not the module of an outside proof file/);
+});
+// The command line: the kind travels to the imports and closure commands too.
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, writeFileSync as wf } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join as pj } from 'node:path';
+const GUARD = new URL('./outside-guard.mjs', import.meta.url).pathname;
+const cli = (...args) => spawnSync(process.execPath, [GUARD, ...args], { encoding: 'utf8' });
+test('reduce cli: gap with kind reduce writes gap.kind reduce; without reductions it is refused', () => {
+  const d = mkdtempSync(pj(tmpdir(), 'guard-reduce-'));
+  wf(pj(d, 'open.json'), JSON.stringify(krow(undefined, { reductions: true })));
+  wf(pj(d, 'dark.json'), JSON.stringify(krow(undefined)));
+  let r = cli('gap', pj(d, 'open.json'), 'L-meta-632', RF(2), d, 'reduce');
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(readFileSync(pj(d, 'gap.kind'), 'utf8'), 'reduce\n');
+  r = cli('gap', pj(d, 'dark.json'), 'L-meta-632', RF(2), d, 'reduce');
+  assert.equal(r.status, 1); assert.match(r.stdout, /^REFUSED: gap L-meta-632 is not open to reductions/);
+  r = cli('gap', pj(d, 'open.json'), 'L-meta-632', RF(2), d, 'check');
+  assert.equal(r.status, 1); assert.match(r.stdout, /judged only by a run of kind reduce/);
+  r = cli('gap-of-file', pj(d, 'open.json'), RF(2), d);
+  assert.equal(r.status, 1);
+  wf(pj(d, 'imports.json'), '[]');
+  wf(pj(d, 'r.lean'), `import Mathlib\ntheorem ${'PEqualNP.Outside.R_meta_632_2'} : (1 = 1) → (2 = 2) → True := fun _ _ => trivial\n`);
+  r = cli('imports', pj(d, 'r.lean'), pj(d, 'imports.json'), RF(2), 'reduce');
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  r = cli('imports', pj(d, 'r.lean'), pj(d, 'imports.json'), RF(2), 'check');
+  assert.equal(r.status, 1); assert.match(r.stdout, /judged only by a run of kind reduce/);
+  r = cli('imports', pj(d, 'r.lean'), pj(d, 'imports.json'), RF(2));
+  assert.equal(r.status, 1);
+  r = cli('closure', d, pj(d, 'imports.json'), RF(2), d, 'reduce');
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  r = cli('closure', d, pj(d, 'imports.json'), KF, d, 'reduce');
+  assert.equal(r.status, 1); assert.match(r.stdout, /judges only a reduction file/);
+});
+
+// A step that left the desk: the refusal says why, from the desk file (checked, or withdrawn with its reason).
+import { checkGap as checkGapLeft } from './outside-guard.mjs';
+const LF = 'lean/PEqualNP/Outside/L_meta_701.lean';
+const leftDesk = { gaps: [{ id: 'L-meta-700', file: 'lean/PEqualNP/Outside/L_meta_700.lean', module: 'PEqualNP.Outside.L_meta_700', statement: 'True', imports: [] }],
+  checked: [{ id: 'L-meta-701', file: LF }], withdrawn: { 'L-meta-702': 'restated as L-meta-703 (basis named in the title)' } };
+test('a step already checked: the refusal says so', () => { assert.throws(() => checkGapLeft(leftDesk, (x) => x.id === 'L-meta-701', LF), /L-meta-701 is already CHECKED/); });
+test('a withdrawn step: the refusal gives the desk reason', () => { assert.throws(() => checkGapLeft(leftDesk, (x) => x.id === 'L-meta-702', 'lean/PEqualNP/Outside/L_meta_702.lean'), /L-meta-702 was WITHDRAWN from the desk \(restated as L-meta-703/); });
+test('a step the desk never had: the refusal says it is not on the desk', () => { assert.throws(() => checkGapLeft(leftDesk, (x) => x.id === 'L-meta-799', 'lean/PEqualNP/Outside/L_meta_799.lean'), /not on the desk/); });
+test('a withdrawn reason with odd characters is cleaned and cut', () => { const d = { gaps: [], checked: [], withdrawn: { 'L-meta-704': '`$(x)` "q" ' + 'a'.repeat(300) } }; assert.throws(() => checkGapLeft(d, (x) => x.id === 'L-meta-704', 'lean/PEqualNP/Outside/L_meta_704.lean'), (e) => !/[`$"]/.test(e.message) && e.message.length < 400); });
